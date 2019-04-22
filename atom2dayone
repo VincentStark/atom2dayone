@@ -1,0 +1,64 @@
+#!/usr/bin/env python
+
+import os
+import logging
+import subprocess
+from time import strftime, strptime
+
+import ConfigParser
+import argparse
+import urllib2
+from jinja2 import Environment, PackageLoader
+from bs4 import BeautifulSoup
+
+# Convert HTML to DayOne Markup
+def processContent(content):
+  content = urllib2.unquote(content).strip()
+  
+  html2text = subprocess.Popen('/usr/local/bin/html2text -b 0', shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+  content_new = html2text.communicate(input=content.encode('utf-8'))[0]
+  return unicode(content_new.replace('\n\n', '\n').replace('\n\n', '\n').replace('\n\n', '\n').replace('\.', '.'), 'utf-8')
+
+# Setup logging
+script_name = os.path.splitext(os.path.basename(__file__))[0]
+logging.basicConfig()
+logger = logging.getLogger(script_name)
+logger.setLevel(logging.INFO)
+
+# Parse command line options
+parser = argparse.ArgumentParser(
+    description='Converts Atom feed to DayOne format')
+parser.add_argument('--version', action='version', version='%(prog)s 0.1.1')
+args = parser.parse_args()
+
+# Read config file
+config = ConfigParser.SafeConfigParser()
+config.read(os.path.join('etc', script_name + '.conf'))
+
+doc = BeautifulSoup(open(config.get('General', 'input')))
+
+# Iterate through entries
+entries = []
+
+for element in doc.find_all('entry'):
+  entry = {}
+
+  entry['date'] = strftime('%d %B, %Y %I:%M %p',
+      strptime(element.updated.string, '%Y-%m-%dT%H:%M:%SZ'))
+  entry['contents'] = str(element.title.string) + '\n'
+  entry['contents'] += processContent(element.content.string)
+
+  entries.append(entry)
+
+logger.info('Got %i entries total', len(entries))
+
+# Prepare template
+env = Environment(loader=PackageLoader('__main__', 'templates'))
+template = env.get_template('dayone_import.tmpl')
+
+# Output products list
+output = open(config.get('General', 'output'), 'w')
+output.write(template.render(entries = entries).encode('utf-8'))
+output.close()
+
+logger.info('All entries successfully exported')
